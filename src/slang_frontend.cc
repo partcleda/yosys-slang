@@ -1669,6 +1669,27 @@ struct HierarchyQueue {
 	std::vector<NetlistContext *> queue;
 };
 
+// The source range to blame when slang handed us an `InvalidExpression` for a
+// symbol's expression. `InvalidExpression` carries an empty range of its own,
+// but it wraps the partially built node, which does have one; fall back to the
+// owning symbol's syntax when even that is missing.
+static slang::SourceRange invalid_expr_range(const ast::Expression &expr, const ast::Symbol &sym)
+{
+	const ast::Expression *cursor = &expr;
+	while (cursor->kind == ast::ExpressionKind::Invalid) {
+		auto child = cursor->as<ast::InvalidExpression>().child;
+		if (!child)
+			break;
+		cursor = child;
+	}
+
+	if (cursor->kind != ast::ExpressionKind::Invalid)
+		return cursor->sourceRange;
+	if (auto syntax = sym.getSyntax())
+		return syntax->sourceRange();
+	return {sym.location, sym.location};
+}
+
 struct PopulateNetlist : public TimingPatternInterpretor, public ast::ASTVisitor<PopulateNetlist, ast::VisitFlags::Statements> {
 public:
 	HierarchyQueue &queue;
@@ -2421,7 +2442,24 @@ public:
 		if (sym.getDelay() && !settings.ignore_timing.value_or(false))
 			netlist.add_diag(diag::GenericTimingUnsyn, sym.getDelay()->sourceRange);
 
-		const ast::AssignmentExpression &expr = sym.getAssignment().as<ast::AssignmentExpression>();
+		// slang leaves an `InvalidExpression` here -- with no diagnostic of its
+		// own -- when the assignment contains a construct it rejected inside a
+		// constant-gated branch: the untaken side of a constant `?:`, or the
+		// short-circuited operand of `||`/`&&`. It binds those under
+		// `ASTFlags::UnevaluatedBranch`, which suppresses the error but still
+		// yields a bad expression, so the compilation reports zero errors and
+		// we get here. `as<AssignmentExpression>()` is an unchecked
+		// `static_cast` in release builds (`SLANG_ASSERT` compiles out under
+		// NDEBUG), so casting anyway is undefined behaviour -- reading
+		// `timingControl` and `left()` out of an unrelated object segfaults.
+		const ast::Expression &assignment = sym.getAssignment();
+		if (assignment.kind != ast::ExpressionKind::Assignment) {
+			netlist.add_diag(diag::InvalidContinuousAssign,
+					invalid_expr_range(assignment, sym));
+			return;
+		}
+
+		const ast::AssignmentExpression &expr = assignment.as<ast::AssignmentExpression>();
 		ast_invariant(expr, !expr.timingControl);
 
 		RTLIL::SigSpec rvalue = netlist.eval(expr.right());

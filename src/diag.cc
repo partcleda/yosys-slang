@@ -133,6 +133,7 @@ DiagCode ReadmemInvalidAddress(DiagSubsystem::Netlist, 1080);
 DiagCode ReadmemAddressOutsideOfRange(DiagSubsystem::Netlist, 1081);
 DiagCode ReadmemWordsRangeMismatch(DiagSubsystem::Netlist, 1082);
 DiagCode ReadmemBadBinaryDigit(DiagSubsystem::Netlist, 1083);
+DiagCode InvalidContinuousAssign(DiagSubsystem::Netlist, 1085);
 
 DiagGroup unsynthesizable("unsynthesizable",
 		{IffUnsupported, GenericTimingUnsyn, BothEdgesUnsupported, ExpectingIfElseAload,
@@ -201,6 +202,9 @@ void setup_messages(slang::DiagnosticEngine &engine)
 
 	engine.setMessage(LangFeatureUnsupported, "unsupported language feature");
 	engine.setSeverity(LangFeatureUnsupported, DiagnosticSeverity::Error);
+
+	engine.setMessage(InvalidContinuousAssign, "no valid expression for this continuous assignment: a subexpression was rejected in a constant-gated branch (the untaken side of a constant '?:', or a short-circuited '||'/'&&' operand)");
+	engine.setSeverity(InvalidContinuousAssign, DiagnosticSeverity::Error);
 
 	engine.setMessage(UnsupportedLhs, "unsupported assignment target expression");
 	engine.setSeverity(UnsupportedLhs, DiagnosticSeverity::Error);
