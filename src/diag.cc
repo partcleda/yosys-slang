@@ -134,6 +134,8 @@ DiagCode ReadmemAddressOutsideOfRange(DiagSubsystem::Netlist, 1081);
 DiagCode ReadmemWordsRangeMismatch(DiagSubsystem::Netlist, 1082);
 DiagCode ReadmemBadBinaryDigit(DiagSubsystem::Netlist, 1083);
 DiagCode InvalidContinuousAssign(DiagSubsystem::Netlist, 1085);
+DiagCode InliningLimitExhausted(DiagSubsystem::Netlist, 1086);
+DiagCode NoteInliningCallSite(DiagSubsystem::Netlist, 1087);
 
 DiagGroup unsynthesizable("unsynthesizable",
 		{IffUnsupported, GenericTimingUnsyn, BothEdgesUnsupported, ExpectingIfElseAload,
@@ -193,6 +195,12 @@ void setup_messages(slang::DiagnosticEngine &engine)
 
 	engine.setMessage(NoteLoopContributes, "loop contributes to unroll tally");
 	engine.setSeverity(NoteLoopContributes, DiagnosticSeverity::Note);
+
+	engine.setMessage(InliningLimitExhausted, "subroutine inlining exceeded the {} limit of {}: recursion which cannot be resolved statically is unsupported for synthesis");
+	engine.setSeverity(InliningLimitExhausted, DiagnosticSeverity::Error);
+
+	engine.setMessage(NoteInliningCallSite, "call inlined from here");
+	engine.setSeverity(NoteInliningCallSite, DiagnosticSeverity::Note);
 
 	engine.setMessage(NonconstWildcardEq, "wildcard equality unsynthesizable with non-constant right-hand operand");
 	engine.setSeverity(NonconstWildcardEq, DiagnosticSeverity::Error);

@@ -1,0 +1,60 @@
+# A call is lowered by inlining the callee's body, so a recursive call inlines
+# the body it appears in. Recursion which cannot be resolved statically has no
+# bottom, and used to run the process off its stack; it is diagnosed instead.
+test_slangdiag -expect "subroutine inlining exceeded the depth limit of 128: recursion which cannot be resolved statically is unsupported for synthesis"
+read_slang <<EOF
+module top(input wire [7:0] a, output wire [15:0] y);
+	function automatic [15:0] fact(input [7:0] n);
+		if (n <= 1) fact = 1;
+		else        fact = n * fact(n-1);
+	endfunction
+	assign y = fact(a);
+endmodule
+EOF
+
+# The same for a subroutine calling itself more than once per level. The depth
+# bound is what fires (the first chain reaches it before anything else), but on
+# its own it would leave an exponential expansion behind to walk after the
+# diagnostic -- the recursive-inlining tally is what keeps this case finishing
+# in well under a second.
+design -reset
+test_slangdiag -expect "subroutine inlining exceeded the depth limit of 128: recursion which cannot be resolved statically is unsupported for synthesis"
+read_slang <<EOF
+module top(input wire [7:0] a, output wire [15:0] y);
+	function automatic [15:0] fib(input [7:0] n);
+		if (n <= 1) fib = n;
+		else        fib = fib(n-1) + fib(n-2);
+	endfunction
+	assign y = fib(a);
+endmodule
+EOF
+
+# Recursion the frontend does resolve still elaborates: a conditional on a
+# fully defined condition only lowers the branch which is taken, so a base
+# case reached at a statically known depth bottoms out. The bound must not
+# reject these.
+design -reset
+read_slang <<EOF
+module top(input wire [7:0] a, output wire [15:0] y);
+	function automatic [15:0] sm(input [7:0] d, input integer depth);
+		if (depth == 0) sm = 0;
+		else            sm = d + sm(d, depth-1);
+	endfunction
+	assign y = sm(a, 3);
+endmodule
+EOF
+hierarchy -top top
+select -assert-count 3 t:$add
+
+design -reset
+read_slang <<EOF
+module top(output wire [15:0] y);
+	function automatic [15:0] fact(input [7:0] n);
+		if (n <= 1) fact = 1;
+		else        fact = n * fact(n-1);
+	endfunction
+	assign y = fact(5);
+endmodule
+EOF
+hierarchy -top top
+select -assert-count 0 t:$mul

@@ -240,6 +240,13 @@ public:
 		auto subroutine = std::get<0>(call.subroutine);
 		auto arg_symbols = subroutine->getArguments();
 
+		// Inlining the body is what makes a recursive call recurse here.
+		// Past the bound the call is not inlined at all and the diagnostic
+		// stands in for the result.
+		InliningLimitTracking::Guard inlining_guard(netlist.inlining_limit);
+		if (!inlining_guard.enter(call, *subroutine))
+			return RTLIL::SigSpec(RTLIL::Sx, (int) call.type->getBitstreamWidth());
+
 		std::vector<RTLIL::SigSpec> arg_in, arg_out;
 
 		for (int i = 0; i < (int)arg_symbols.size(); i++) {

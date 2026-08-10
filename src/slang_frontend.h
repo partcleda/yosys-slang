@@ -40,6 +40,7 @@ namespace slang {
 		class StreamingConcatenationExpression;
 		class ConversionExpression;
 		class AssignmentExpression;
+		class CallExpression;
 		class FieldSymbol;
 		class NetSymbol;
 		class ElementSelectExpression;
@@ -202,6 +203,73 @@ private:
 	int unrolling = 0;
 	int unroll_counter = 0;
 	Yosys::pool<const ast::Statement * YS_HASH_PTR_OPS> loops;
+	bool error_issued = false;
+};
+
+// Bounds the inlining of subroutine bodies (`StatementExecutor::handle_call`).
+//
+// A call is lowered by inlining the callee's body, so a call the callee makes
+// to itself is inlined in its turn. Recursion the frontend can resolve
+// statically terminates on its own: a conditional whose condition evaluates to
+// a fully defined constant only lowers the branch which is taken, which is how
+// a recursive function with a statically known base case bottoms out here.
+// Recursion it cannot resolve does not terminate, and unbounded it takes the
+// process down instead of diagnosing the design -- off the end of the C++
+// stack for a subroutine calling itself once per level, or into an exponential
+// expansion for one calling itself more than once. Either bound below reports
+// `diag::InliningLimitExhausted` and substitutes an undefined result.
+class InliningLimitTracking {
+public:
+	InliningLimitTracking(NetlistContext &netlist) : netlist(netlist) {}
+
+	// Nesting of inlined subroutine bodies. 128 is what slang itself allows
+	// instantiation to nest (`--max-instance-depth`), and is far past what
+	// terminating recursion in synthesizable RTL reaches.
+	static constexpr int depth_limit = 128;
+
+	// Recursive inlinings -- a subroutine body inlined within its own body --
+	// for one outermost call. Depth alone does not bound the expansion of a
+	// subroutine calling itself more than once per level: that stays inside
+	// `depth_limit` while expanding exponentially. Only recursive inlinings
+	// are tallied, so an ordinary deep call tree is never rejected by this
+	// bound. Same magnitude as the default unroll limit, the other bound on
+	// how far a single expression may expand.
+	static constexpr int recursive_tally_limit = 4000;
+
+	// Scoped entry into the inlining of one call. `enter` returning false
+	// means the call must not be inlined (the diagnostic has been issued);
+	// the tracking is left unentered in that case.
+	class Guard {
+	public:
+		Guard(InliningLimitTracking &tracking) : tracking(tracking) {}
+		~Guard() { if (entered) tracking.exit(); }
+		Guard(const Guard&) = delete;
+		Guard& operator=(const Guard&) = delete;
+
+		bool enter(const ast::CallExpression &call, const ast::SubroutineSymbol &subroutine)
+		{
+			entered = tracking.enter(call, subroutine);
+			return entered;
+		}
+
+	private:
+		InliningLimitTracking &tracking;
+		bool entered = false;
+	};
+
+private:
+	bool enter(const ast::CallExpression &call, const ast::SubroutineSymbol &subroutine);
+	void exit();
+
+	NetlistContext &netlist;
+	// The subroutines whose bodies are being inlined, outermost first. Its
+	// size is the current inlining depth, and a subroutine appearing in it
+	// twice is recursion.
+	std::vector<const ast::SubroutineSymbol *> inline_stack;
+	int recursive_tally = 0;
+	// The call the current inlining nest started from, for a note pointing at
+	// the recursion's entry point.
+	const ast::CallExpression *outermost_call = nullptr;
 	bool error_issued = false;
 };
 
@@ -559,6 +627,12 @@ struct NetlistContext : RTLILBuilder, public DiagnosticIssuer {
 	// Flag to disable elaboration; we set this when `scopes_remap` is
 	// incomplete due to prior errors
 	bool disabled = false;
+
+	// Bound on subroutine inlining. Kept here, and not on the procedural
+	// context, because a call evaluated outside a procedure opens a fresh
+	// procedural context of its own -- the netlist is what every level of an
+	// inlining nest shares.
+	InliningLimitTracking inlining_limit{*this};
 
 	NetlistContext(RTLIL::Design *design,
 		SynthesisSettings &settings,

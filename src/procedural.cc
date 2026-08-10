@@ -5,8 +5,11 @@
 // Distributed under the terms of the ISC license, see LICENSE
 //
 
+#include <algorithm>
+
 #include "slang/ast/Statement.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
+#include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/MiscExpressions.h"
 #include "slang/ast/expressions/OperatorExpressions.h"
@@ -503,6 +506,53 @@ void UnrollLimitTracking::enter_unrolling()
 		error_issued = false;
 		loops.clear();
 	}
+}
+
+bool InliningLimitTracking::enter(const ast::CallExpression &call,
+								 const ast::SubroutineSymbol &subroutine)
+{
+	if (inline_stack.empty()) {
+		recursive_tally = 0;
+		error_issued = false;
+		outermost_call = &call;
+	}
+
+	bool recursive = std::find(inline_stack.begin(), inline_stack.end(), &subroutine)
+			!= inline_stack.end();
+
+	const char *exhausted = nullptr;
+	int limit = 0;
+	if ((int) inline_stack.size() >= depth_limit) {
+		exhausted = "depth";
+		limit = depth_limit;
+	} else if (recursive && recursive_tally >= recursive_tally_limit) {
+		exhausted = "recursive expansion";
+		limit = recursive_tally_limit;
+	}
+
+	if (exhausted) {
+		if (!error_issued) {
+			auto &diag = netlist.add_diag(diag::InliningLimitExhausted, call.sourceRange);
+			diag << std::string(exhausted) << limit;
+			if (outermost_call && outermost_call != &call)
+				diag.addNote(diag::NoteInliningCallSite, outermost_call->sourceRange);
+			error_issued = true;
+		}
+		return false;
+	}
+
+	if (recursive)
+		recursive_tally++;
+	inline_stack.push_back(&subroutine);
+	return true;
+}
+
+void InliningLimitTracking::exit()
+{
+	log_assert(!inline_stack.empty());
+	inline_stack.pop_back();
+	if (inline_stack.empty())
+		outermost_call = nullptr;
 }
 
 void UnrollLimitTracking::exit_unrolling()

@@ -90,6 +90,8 @@ extern slang::DiagCode ReadmemAddressOutsideOfRange;
 extern slang::DiagCode ReadmemWordsRangeMismatch;
 extern slang::DiagCode ReadmemBadBinaryDigit;
 extern slang::DiagCode InvalidContinuousAssign;
+extern slang::DiagCode InliningLimitExhausted;
+extern slang::DiagCode NoteInliningCallSite;
 
 void setup_messages(slang::DiagnosticEngine &engine);
 }; // namespace diag
